@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Benchmark Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; }
+    header { padding: 2rem 2.5rem 1rem; border-bottom: 1px solid #2d3748; }
+    header h1 { font-size: 1.6rem; font-weight: 700; color: #f7fafc; }
+    header p  { margin-top: .35rem; font-size: .9rem; color: #718096; }
+    main { padding: 2rem 2.5rem; max-width: 1200px; margin: 0 auto; }
+    #chart { width: 100%; height: 480px; }
+    .section-title { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em;
+                     color: #718096; margin: 2rem 0 .75rem; }
+    table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+    th, td { padding: .55rem .75rem; text-align: right; border-bottom: 1px solid #2d3748; }
+    th:first-child, td:first-child { text-align: left; font-weight: 600; color: #a0aec0; }
+    th { color: #718096; font-weight: 500; }
+    tr:hover td { background: #1a202c; }
+    .loading { color: #718096; font-size: .9rem; padding: 3rem 0; text-align: center; }
+    .error   { color: #fc8181; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Benchmark Dashboard</h1>
+    <p>Model performance across MMLU · HumanEval · MATH · GSM8K · MT-Bench (2024–2025)</p>
+  </header>
+  <main>
+    <p class="section-title">Grouped by Benchmark</p>
+    <div id="chart"><p class="loading">Loading chart…</p></div>
+
+    <p class="section-title">Score Table</p>
+    <div id="table-wrapper"><p class="loading">Loading table…</p></div>
+  </main>
+
+  <script>
+    const PLOTLY_LAYOUT = {
+      paper_bgcolor: '#0f1117',
+      plot_bgcolor:  '#1a202c',
+      font: { color: '#e2e8f0', size: 12 },
+      legend: { orientation: 'h', y: -0.18 },
+      xaxis: { tickfont: { size: 11 }, gridcolor: '#2d3748' },
+      yaxis: { gridcolor: '#2d3748', range: [0, 105] },
+      margin: { t: 20, r: 20, b: 80, l: 50 },
+      barmode: 'group',
+    };
+
+    fetch('/api/benchmarks')
+      .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
+      .then(data => {
+        renderChart(data);
+        renderTable(data);
+      })
+      .catch(err => {
+        document.getElementById('chart').innerHTML =
+          `<p class="loading error">Failed to load data: ${err.message}</p>`;
+      });
+
+    function renderChart(data) {
+      const traces = data.traces.map(t => ({
+        ...t,
+        marker: { opacity: 0.85 },
+        hovertemplate: '<b>%{x}</b><br>%{data.name}: %{y}<extra></extra>',
+      }));
+      Plotly.newPlot('chart', traces, PLOTLY_LAYOUT, { responsive: true, displayModeBar: false });
+    }
+
+    function renderTable(data) {
+      const benchmarks = data.benchmarks;
+      const models = data.models;
+      // Transpose: rows = models, cols = benchmarks
+      const scoreMap = {};
+      data.traces.forEach(t => {
+        t.x.forEach((model, i) => {
+          if (!scoreMap[model]) scoreMap[model] = {};
+          scoreMap[model][t.name] = t.y[i];
+        });
+      });
+
+      let html = '<table><thead><tr><th>Model</th>';
+      benchmarks.forEach(b => { html += `<th title="${data.meta[b]?.description || ''}">${b}</th>`; });
+      html += '</tr></thead><tbody>';
+
+      models.forEach(model => {
+        html += `<tr><td>${model}</td>`;
+        benchmarks.forEach(b => {
+          const val = scoreMap[model]?.[b];
+          const unit = data.meta[b]?.unit || '';
+          html += `<td>${val != null ? val + unit : '—'}</td>`;
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      document.getElementById('table-wrapper').innerHTML = html;
+    }
+  </script>
+</body>
+</html>
