@@ -1,5 +1,5 @@
 """
-us-gpt-4-api-client — CLI client for OpenAI GPT-4 models with streaming,
+groq-chat-client — CLI client for Groq-hosted LLMs with streaming,
 multi-turn conversation history, and retry on rate limits.
 """
 
@@ -11,12 +11,25 @@ import sys
 import time
 from pathlib import Path
 
-from openai import OpenAI, APIConnectionError, APIError, RateLimitError
+from pathlib import Path
 
-HISTORY_PATH = Path.home() / ".local" / "share" / "gpt4-client" / "history.json"
+from dotenv import load_dotenv
+from groq import Groq, APIConnectionError, APIError, RateLimitError
+
+# Load from the shared project .env — walk up 4 levels to trail/, then Ai_job/.env
+_ENV_PATH = Path(__file__).resolve().parents[4] / "Ai_job" / ".env"
+load_dotenv(dotenv_path=_ENV_PATH)
+
+HISTORY_PATH = Path.home() / ".local" / "share" / "groq-client" / "history.json"
 MAX_HISTORY_TURNS = 20
-DEFAULT_MODEL = "gpt-4o"
-AVAILABLE_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4"]
+DEFAULT_MODEL = "llama-3.3-70b-versatile"
+AVAILABLE_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "mixtral-8x7b-32768",
+    "gemma2-9b-it",
+    "deepseek-r1-distill-llama-70b",
+]
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "WARNING"),
@@ -45,7 +58,7 @@ def _save_history(messages: list[dict]) -> None:
 
 
 def _send_with_retry(
-    client: OpenAI,
+    client: Groq,
     messages: list[dict],
     model: str,
     max_tokens: int,
@@ -55,23 +68,26 @@ def _send_with_retry(
         try:
             if stream:
                 collected: list[str] = []
-                with client.chat.completions.stream(
+                response = client.chat.completions.create(
                     model=model,
                     messages=messages,
                     max_tokens=max_tokens,
-                ) as s:
-                    for chunk in s.text_stream:
-                        print(chunk, end="", flush=True)
-                        collected.append(chunk)
+                    stream=True,
+                )
+                for chunk in response:
+                    text = chunk.choices[0].delta.content or ""
+                    print(text, end="", flush=True)
+                    collected.append(text)
                 print()
                 return "".join(collected)
             else:
-                resp = client.chat.completions.create(
+                response = client.chat.completions.create(
                     model=model,
                     messages=messages,
                     max_tokens=max_tokens,
                 )
-                return resp.choices[0].message.content or ""
+                return response.choices[0].message.content or ""
+
         except RateLimitError:
             if attempt == 2:
                 raise
@@ -88,7 +104,7 @@ def _send_with_retry(
 
 
 def run_interactive(
-    client: OpenAI,
+    client: Groq,
     model: str,
     max_tokens: int,
     system: str,
@@ -100,7 +116,7 @@ def run_interactive(
         messages = [m for m in messages if m["role"] != "system"]
         messages.insert(0, {"role": "system", "content": system})
 
-    print(f"GPT-4 client [{model}] — 'exit' to quit, 'clear' to reset history")
+    print(f"Groq client [{model}] — 'exit' to quit, 'clear' to reset history")
     print("-" * 60)
 
     while True:
@@ -135,7 +151,7 @@ def run_interactive(
 
 
 def run_single(
-    client: OpenAI,
+    client: Groq,
     prompt: str,
     model: str,
     max_tokens: int,
@@ -159,7 +175,7 @@ def run_single(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="CLI client for OpenAI GPT-4 models.")
+    parser = argparse.ArgumentParser(description="CLI client for Groq LLMs.")
     parser.add_argument("prompt", nargs="?",
                         help="Single prompt. Omit for interactive mode.")
     parser.add_argument("-m", "--model", default=DEFAULT_MODEL,
@@ -181,12 +197,13 @@ def main() -> int:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        print("Error: OPENAI_API_KEY environment variable is not set.", file=sys.stderr)
+        print("Error: GROQ_API_KEY environment variable is not set.", file=sys.stderr)
+        print("Get a free key at https://console.groq.com/keys", file=sys.stderr)
         return 1
 
-    client = OpenAI(api_key=api_key)
+    client = Groq(api_key=api_key)
 
     if args.prompt:
         run_single(client, args.prompt, args.model, args.max_tokens,
